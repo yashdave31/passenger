@@ -184,8 +184,8 @@ public:
 	bool m_restarting: 1;
 	/** Whether the restart in progress was requested as a rolling restart. Separate from
 	 * m_restarting so that we don't disturb the invariants that attach() and spawn() check
-	 * against m_restarting. Currently only informational: the rolling algorithm is not
-	 * implemented yet, so a rolling restart still runs as a blocking one.
+	 * against m_restarting: while a rolling restart is in progress, m_restarting is false.
+	 * Cleared by finalizeRollingRestart() when it finishes or aborts.
 	 */
 	bool m_rollingRestarting: 1;
 	bool alwaysRestartFileExists: 1;
@@ -231,6 +231,8 @@ public:
 	void finalizeRestart(GroupPtr self, Options oldOptions, Options newOptions,
 		RestartMethod method, SpawningKit::FactoryPtr spawningKitFactory,
 		unsigned int restartsInitiated, boost::container::vector<Callback> postLockActions);
+	void finalizeRollingRestart(GroupPtr self, Options oldOptions, SpawningKit::SpawnerPtr oldSpawner,
+		Options newOptions, SpawningKit::SpawnerPtr newSpawner, unsigned int restartsInitiated);
 
 	/****** Process list management ******/
 
