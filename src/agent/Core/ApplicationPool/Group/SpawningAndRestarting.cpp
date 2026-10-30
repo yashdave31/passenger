@@ -480,7 +480,9 @@ Group::restart(const Options &options, RestartMethod method) {
 		// Switch to the new spawner and options right now, while we hold the pool lock.
 		Options oldOptions = this->options.copyAndPersist().clearPerRequestFields();
 		SpawningKit::SpawnerPtr oldSpawner = spawner;
-		resetOptions(options);
+		// `options` may alias this->options (e.g. when called from the API), so copy it first.
+		Options newOptions = options.copyAndPersist().clearPerRequestFields();
+		resetOptions(newOptions);
 		spawner = getContext()->spawningKitFactory->create(this->options);
 		getPool()->interruptableThreads.create_thread(
 			boost::bind(&Group::finalizeRollingRestart, this, shared_from_this(),
