@@ -1,0 +1,70 @@
+name: Rolling restarts deploy tarball
+
+# Builds a tarball with the Passenger runtime files and the Nginx dynamic module, for
+# installing Passenger on a server without compiling anything there. See
+# doc/RollingRestarts.md.
+#
+# Push a tag named rolling-* to publish the tarball as a GitHub release. A manual run
+# or a pull request that touches the packaging only uploads it as a workflow artifact.
+#
+# The tarball is built on Ubuntu 22.04 x86_64 for the Nginx version below. To target a
+# different Nginx version or OS release, change the version and checksum (and the runner).
+
+env:
+  NGINX_VERSION: 1.18.0
+  # SHA256 of https://nginx.org/download/nginx-1.18.0.tar.gz
+  NGINX_SHA256: 4c373e7ab5bf91d34a4f11a0c9496561061ba5eee6020db272a17a7228d35f99
+  RUBY_VERSION: '3.2'
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ['rolling-*']
+  pull_request:
+    paths:
+      - dev/ci/package-rolling-tarball
+      - .github/workflows/rolling-tarball.yml
+
+jobs:
+  build:
+    name: Build tarball (Ubuntu 22.04, x86_64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: write # Only used to create the release for rolling-* tags.
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        timeout-minutes: 1
+
+      - name: Fetch the submodules the build needs
+        run: git submodule update --init build/support/vendor/cxxcodebuilder build/support/vendor/cxx_hinted_parser
+
+      - uses: ruby/setup-ruby@0cb964fd540e0a24c900370abf38a33466142735
+        timeout-minutes: 2
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libssl-dev zlib1g-dev libpcre3-dev libpcre2-dev
+
+      - name: Build Passenger and the Nginx support objects
+        run: rake -m -j"$(nproc)" nginx:as_dynamic_module
+
+      - name: Build the Nginx module and package the tarball
+        run: dev/ci/package-rolling-tarball dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: passenger-rolling-linux-x86_64
+          path: dist/*
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/rolling-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Passenger with rolling restarts ($GITHUB_REF_NAME)" \
+            --notes "Built from $GITHUB_SHA for Nginx $NGINX_VERSION on Ubuntu 22.04 (x86_64). See doc/RollingRestarts.md for how to install it."

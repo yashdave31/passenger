@@ -51,6 +51,20 @@ The XML output has `rolling_restarting`, `rolling_restart_total` and `rolling_re
 
 The C++ tests are in `test/cxx/Core/ApplicationPool/PoolTest.cpp` (tests 22 to 24). They step a roll one replacement at a time using the pool debug support: the roll sends `About to replace process N` and waits for `Replace process N`, and sends `Rolling restart done` at the end. Test 24 runs 20 rolls in a row and checks the pool invariants after each. The failed-deployment and shutdown cases are not covered by C++ tests; they were verified by hand against a running Nginx.
 
+## Installing without compiling on the server
+
+`.github/workflows/rolling-tarball.yml` builds a tarball containing the Passenger runtime files, the agent binary and the Nginx dynamic module, using `dev/ci/package-rolling-tarball`. Pushing a tag named `rolling-*` publishes it (with its `.sha256` file) as a GitHub release; a manual run uploads it as a workflow artifact instead.
+
+The tarball is built for one Nginx version (set in the workflow, with the SHA256 of its source tarball) on Ubuntu 22.04 x86_64. The module is built with `--with-compat`, so it loads into the distribution's Nginx of the same version without replicating its configure flags; `nginx -t` rejects a module that is not compatible. The binaries are not portable across OS releases or CPU architectures, so build on the target's OS and architecture.
+
+To use it on a server that already runs the distribution's Nginx and Passenger packages, unpack it as root into its own directory, then point the existing configuration at it and restart Nginx (a reload does not load a different module):
+
+- in the file that loads the Passenger module, change `load_module` to `<dir>/ngx_http_passenger_module.so`;
+- change `passenger_root` to `<dir>`;
+- add `passenger_rolling_restarts on;`.
+
+Leave the distribution packages installed. Rolling back is reverting those lines and restarting Nginx. The files must not be writable by an unprivileged user, because the Nginx master process runs as root and executes them.
+
 ## Known limits
 
 - The Core's memory grew by roughly 1 MB more over 30 consecutive rolls under load than over 30 blocking restarts (about 2.7 MB versus 1.7 MB, with the growth slowing down in both). That was not investigated further, so it is not known whether it is a leak or allocator behavior. Memory of the application processes stayed flat.
