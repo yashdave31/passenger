@@ -379,6 +379,7 @@ Controller::createNewPoolOptions(Client *client, Request *req,
 	fillPoolOption(req, options.startupFile, "!~PASSENGER_STARTUP_FILE");
 	fillPoolOption(req, options.loadShellEnvvars, "!~PASSENGER_LOAD_SHELL_ENVVARS");
 	fillPoolOption(req, options.preloadBundler, "!~PASSENGER_PRELOAD_BUNDLER");
+	fillPoolOption(req, options.rollingRestart, "!~PASSENGER_ROLLING_RESTARTS");
 	fillPoolOption(req, options.fileDescriptorUlimit, "!~PASSENGER_APP_FILE_DESCRIPTOR_ULIMIT");
 	fillPoolOption(req, options.raiseInternalError, "!~PASSENGER_RAISE_INTERNAL_ERROR");
 	fillPoolOption(req, options.lveMinUid, "!~PASSENGER_LVE_MIN_UID");

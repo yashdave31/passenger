@@ -314,6 +314,8 @@ Group::restart(const Options &options, RestartMethod method) {
 
 	assert(isAlive());
 	P_DEBUG("Restarting group " << getName());
+	P_INFO("[rolling-restart probe] group " << getName() << " options.rollingRestart="
+		<< (options.rollingRestart ? "true" : "false"));
 
 	// If there is currently a restarter thread or a spawner thread active,
 	// the following tells them to abort their current work as soon as possible.

@@ -754,8 +754,8 @@ NGINX_CONFIGURATION_OPTIONS = [
     name: 'passenger_rolling_restarts',
     scope: :application,
     type: :flag,
-    function: 'passenger_enterprise_only',
-    field: nil,
+    default: false,
+    header: 'PASSENGER_ROLLING_RESTARTS',
   },
   {
     name: 'passenger_resist_deployment_errors',

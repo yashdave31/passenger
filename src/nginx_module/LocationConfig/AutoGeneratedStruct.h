@@ -59,6 +59,7 @@ typedef struct {
     ngx_array_t *monitor_log_file;
     ngx_flag_t preload_bundler;
     ngx_int_t request_queue_overflow_status_code;
+    ngx_flag_t rolling_restarts;
     ngx_int_t spawn_exception_status_code;
     ngx_uint_t start_timeout;
     ngx_flag_t sticky_sessions;
@@ -120,6 +121,7 @@ typedef struct {
     ngx_str_t python_source_file;
     ngx_str_t request_queue_overflow_status_code_source_file;
     ngx_str_t restart_dir_source_file;
+    ngx_str_t rolling_restarts_source_file;
     ngx_str_t ruby_source_file;
     ngx_str_t spawn_exception_status_code_source_file;
     ngx_str_t spawn_method_source_file;
@@ -177,6 +179,7 @@ typedef struct {
     ngx_uint_t python_source_line;
     ngx_uint_t request_queue_overflow_status_code_source_line;
     ngx_uint_t restart_dir_source_line;
+    ngx_uint_t rolling_restarts_source_line;
     ngx_uint_t ruby_source_line;
     ngx_uint_t spawn_exception_status_code_source_line;
     ngx_uint_t spawn_method_source_line;
@@ -234,6 +237,7 @@ typedef struct {
     ngx_int_t python_explicitly_set;
     ngx_int_t request_queue_overflow_status_code_explicitly_set;
     ngx_int_t restart_dir_explicitly_set;
+    ngx_int_t rolling_restarts_explicitly_set;
     ngx_int_t ruby_explicitly_set;
     ngx_int_t spawn_exception_status_code_explicitly_set;
     ngx_int_t spawn_method_explicitly_set;

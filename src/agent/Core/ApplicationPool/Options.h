@@ -315,6 +315,9 @@ public:
 	 */
 	bool preloadBundler;
 
+	/** Whether restarts of this app group replace processes one at a time instead of all at once. */
+	bool rollingRestart;
+
 	bool userSwitching;
 
 	/**
@@ -464,6 +467,7 @@ public:
 		  debugger(false),
 		  loadShellEnvvars(true),
 		  preloadBundler(false),
+		  rollingRestart(false),
 		  userSwitching(true),
 		  raiseInternalError(false),
 
