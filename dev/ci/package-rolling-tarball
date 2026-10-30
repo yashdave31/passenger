@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Builds the Nginx dynamic module against a pinned upstream Nginx source tarball and
+# packages the runtime files of this Passenger checkout into a tarball, so that
+# Passenger can be installed on a server without compiling anything there.
+#
+# The result is meant to replace a distro-packaged Passenger on a server that runs
+# the same Nginx version: the server points `load_module` at
+# <extracted dir>/ngx_http_passenger_module.so and `passenger_root` at <extracted dir>.
+# See doc/RollingRestarts.md.
+#
+# Run it after `rake nginx:as_dynamic_module`, on the same OS release and CPU
+# architecture as the target server (the binaries are not portable across glibc versions).
+#
+# Usage: NGINX_VERSION=1.18.0 NGINX_SHA256=<sha256 of the tarball> dev/ci/package-rolling-tarball OUTPUT_DIR
+set -euo pipefail
+
+: "${NGINX_VERSION:?NGINX_VERSION is required}"
+: "${NGINX_SHA256:?NGINX_SHA256 is required}"
+OUTPUT_DIR="${1:?Usage: package-rolling-tarball OUTPUT_DIR}"
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ARCH="$(uname -m)"
+ASSET="passenger-rolling-linux-$ARCH.tar.gz"
+
+[ -x "$ROOT/buildout/support-binaries/PassengerAgent" ] || {
+	echo "buildout/support-binaries/PassengerAgent not found; run 'rake nginx:as_dynamic_module' first"
+	exit 1
+}
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+
+## Build the module against the pinned Nginx source.
+##
+## --with-compat makes the module loadable into a distro Nginx of the same version,
+## whose full set of configure flags we do not replicate.
+
+curl -fsSL -o "$WORK/nginx.tar.gz" "https://nginx.org/download/nginx-$NGINX_VERSION.tar.gz"
+echo "$NGINX_SHA256  $WORK/nginx.tar.gz" | sha256sum -c -
+tar -xzf "$WORK/nginx.tar.gz" -C "$WORK"
+(
+	cd "$WORK/nginx-$NGINX_VERSION"
+	./configure --with-compat --with-http_ssl_module \
+		--add-dynamic-module="$ROOT/src/nginx_module"
+	make modules
+)
+MODULE="$WORK/nginx-$NGINX_VERSION/objs/ngx_http_passenger_module.so"
+grep -q passenger_rolling_restarts "$MODULE" || {
+	echo "The built module does not contain passenger_rolling_restarts"
+	exit 1
+}
+
+
+## Stage only what Passenger needs at runtime. The layout matches a source checkout,
+## which is what Passenger recognizes when `passenger_root` points at a directory
+## (see PhusionPassenger.locate_directories).
+
+STAGE="$WORK/stage"
+mkdir -p "$STAGE/buildout/support-binaries"
+cp -a "$ROOT/bin" "$ROOT/resources" "$ROOT/src" "$ROOT/LICENSE" "$STAGE/"
+cp -a "$ROOT/buildout/support-binaries/PassengerAgent" "$STAGE/buildout/support-binaries/"
+# Ruby native extensions built by the rake task, if any. Passenger works without them.
+if [ -d "$ROOT/buildout/ruby" ]; then
+	cp -a "$ROOT/buildout/ruby" "$STAGE/buildout/"
+fi
+cp "$MODULE" "$STAGE/"
+
+PASSENGER_VERSION="$(ruby -I "$ROOT/src/ruby_supportlib" -e 'require "phusion_passenger"; print PhusionPassenger::VERSION_STRING')"
+cat > "$STAGE/BUILD-INFO.txt" <<EOF
+passenger_version=$PASSENGER_VERSION
+nginx_version=$NGINX_VERSION
+arch=$ARCH
+commit=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)
+built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+os=$(. /etc/os-release && echo "$PRETTY_NAME")
+EOF
+
+
+## Package. Files are owned by root inside the archive: the server's Nginx master runs
+## as root and executes them, so they must not be writable by an unprivileged user.
+
+mkdir -p "$OUTPUT_DIR"
+tar --owner=0 --group=0 --numeric-owner -czf "$OUTPUT_DIR/$ASSET" -C "$STAGE" .
+(cd "$OUTPUT_DIR" && sha256sum "$ASSET" > "$ASSET.sha256")
+echo "Wrote $OUTPUT_DIR/$ASSET ($(du -h "$OUTPUT_DIR/$ASSET" | cut -f1))"
+cat "$STAGE/BUILD-INFO.txt"
