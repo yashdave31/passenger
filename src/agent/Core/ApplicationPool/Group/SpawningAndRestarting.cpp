@@ -277,6 +277,7 @@ Group::finalizeRestart(GroupPtr self,
 	spawner    = newSpawner;
 
 	m_restarting = false;
+	m_rollingRestarting = false;
 	if (shouldSpawn()) {
 		spawn();
 	} else if (isWaitingForCapacity()) {
@@ -314,8 +315,6 @@ Group::restart(const Options &options, RestartMethod method) {
 
 	assert(isAlive());
 	P_DEBUG("Restarting group " << getName());
-	P_INFO("[rolling-restart probe] group " << getName() << " options.rollingRestart="
-		<< (options.rollingRestart ? "true" : "false"));
 
 	// If there is currently a restarter thread or a spawner thread active,
 	// the following tells them to abort their current work as soon as possible.
@@ -324,6 +323,13 @@ Group::restart(const Options &options, RestartMethod method) {
 	processesBeingSpawned = 0;
 	m_spawning   = false;
 	m_restarting = true;
+	m_rollingRestarting = (method == RM_ROLLING
+		|| (method == RM_DEFAULT && this->options.rollingRestart))
+		&& !enabledProcesses.empty();
+	if (m_rollingRestarting) {
+		// Stub: the rolling algorithm is not implemented yet, so fall through to a blocking restart.
+		P_INFO("Rolling restart path taken for group " << getName());
+	}
 	uuid         = generateUuid(pool);
 	this->options.groupUuid = uuid;
 	detachAll(actions);

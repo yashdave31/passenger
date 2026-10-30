@@ -182,6 +182,12 @@ public:
 	 *    if m_restarting: processesBeingSpawned == 0
 	 */
 	bool m_restarting: 1;
+	/** Whether the restart in progress was requested as a rolling restart. Separate from
+	 * m_restarting so that we don't disturb the invariants that attach() and spawn() check
+	 * against m_restarting. Currently only informational: the rolling algorithm is not
+	 * implemented yet, so a rolling restart still runs as a blocking one.
+	 */
+	bool m_rollingRestarting: 1;
 	bool alwaysRestartFileExists: 1;
 
 	/** Contains the spawn loop thread and the restarter thread. */

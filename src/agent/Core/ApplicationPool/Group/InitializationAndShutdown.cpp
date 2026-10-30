@@ -120,6 +120,7 @@ Group::Group(Pool *_pool, const Options &_options)
 	processesBeingSpawned = 0;
 	m_spawning     = false;
 	m_restarting   = false;
+	m_rollingRestarting = false;
 	lifeStatus.store(ALIVE, boost::memory_order_relaxed);
 	lastRestartFileMtime = 0;
 	lastRestartFileCheckTime = 0;
