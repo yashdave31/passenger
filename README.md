@@ -8,6 +8,10 @@
 
 <p>What makes Passenger so fast and reliable is its <strong>C++</strong> core, its <strong>zero-copy</strong> architecture, its <strong>watchdog</strong> system and its <strong>hybrid</strong> evented, multi-threaded and multi-process design.</p>
 
+### Rolling restarts
+
+This fork adds zero-downtime rolling restarts for Nginx. Turn them on with `passenger_rolling_restarts on;`. See [doc/RollingRestarts.md](doc/RollingRestarts.md).
+
 ### Learn more:
 - [Website](https://www.phusionpassenger.com/)
 - [Fuse Panel](https://www.phusionpassenger.com/fuse-panel)

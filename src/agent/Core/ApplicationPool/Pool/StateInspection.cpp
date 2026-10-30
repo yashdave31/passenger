@@ -117,6 +117,12 @@ Pool::inspectProcessList(const InspectOptions &options, stringstream &result,
 			result << "    DISABLED" << endl;
 		} else if (process->enabled == Process::DETACHED) {
 			result << "    Shutting down..." << endl;
+		} else if (group->m_rollingRestarting) {
+			if (process->getSpawnEndTime() < group->rollingRestartStartTime) {
+				result << "    Pending replacement (previous version)" << endl;
+			} else {
+				result << "    Replacement (new version)" << endl;
+			}
 		}
 
 		const Socket *socket = NULL;//shut up compiler
@@ -179,6 +185,10 @@ Pool::inspect(const InspectOptions &options, bool lock) const {
 		result << "  App root: " << group->options.appRoot << endl;
 		if (group->restarting()) {
 			result << "  (restarting...)" << endl;
+		}
+		if (group->m_rollingRestarting) {
+			result << "  (rolling restart: " << group->rollingRestartReplaced << " of "
+				<< group->rollingRestartTotal << " processes replaced...)" << endl;
 		}
 		if (group->spawning()) {
 			if (group->processesBeingSpawned == 0) {

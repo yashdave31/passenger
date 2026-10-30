@@ -300,6 +300,166 @@ Group::finalizeRestart(GroupPtr self,
 	}
 }
 
+/**
+ * Replaces the group's enabled processes one at a time, instead of detaching all of
+ * them up front like finalizeRestart() does, so that the group never has zero
+ * processes serving requests.
+ *
+ * For each old process: spawn one replacement and wait until it is ready (without
+ * holding the pool lock, because spawning is slow), then, under the lock, swap them:
+ * attach the replacement and detach the old process. The old process is not killed
+ * right away. Detaching moves it onto `detachedProcesses`, where
+ * detachedProcessesCheckerMain() shuts it down once its sessions have finished, so
+ * in-flight requests are not cut off.
+ *
+ * restart() has already switched the group to the new spawner and options (under the
+ * pool lock, so that no process on the old code can be spawned and attached after the
+ * roll). If the first replacement fails to spawn, the group is switched back, so a
+ * deployment that cannot boot leaves the group untouched. If a later replacement fails,
+ * the roll stops and the remaining old processes keep serving on the previous code.
+ *
+ * The roll gives up as soon as `restartsInitiated` changes (a newer restart took
+ * over) or the group shuts down.
+ */
+void
+Group::finalizeRollingRestart(GroupPtr self, Options oldOptions, SpawningKit::SpawnerPtr oldSpawner,
+	Options newOptions, SpawningKit::SpawnerPtr newSpawner, unsigned int restartsInitiated)
+{
+	TRACE_POINT();
+	boost::this_thread::disable_interruption di;
+	boost::this_thread::disable_syscall_interruption dsi;
+
+	Options &spawnOptions = newOptions;
+	Pool *pool = getPool();
+
+	// Old processes that are enabled get replaced one by one. Processes that are not
+	// enabled (disabling/disabled) are not serving new requests, so they are just detached.
+	ProcessList toReplace;
+	{
+		ScopedLock l(pool->syncher);
+		if (!isAlive() || restartsInitiated != this->restartsInitiated) {
+			return;
+		}
+		boost::container::vector<Callback> actions;
+		toReplace = enabledProcesses;
+		ProcessList notEnabled;
+		foreach (ProcessPtr process, disablingProcesses) {
+			notEnabled.push_back(process);
+		}
+		foreach (ProcessPtr process, disabledProcesses) {
+			notEnabled.push_back(process);
+		}
+		foreach (ProcessPtr process, notEnabled) {
+			detach(process, actions);
+		}
+		l.unlock();
+		Pool::runAllActions(actions);
+	}
+
+	P_INFO("Rolling restart of group " << getName() << " started: replacing "
+		<< toReplace.size() << " process(es)");
+
+	unsigned int replaced = 0;
+	// Newest to oldest, so that the warmest processes keep serving the longest.
+	for (ProcessList::reverse_iterator it = toReplace.rbegin(); it != toReplace.rend(); it++) {
+		ProcessPtr old = *it;
+
+		UPDATE_TRACE_POINT();
+		ProcessPtr fresh;
+		try {
+			boost::this_thread::restore_interruption ri(di);
+			boost::this_thread::restore_syscall_interruption rsi(dsi);
+			fresh = createProcessObject(*newSpawner, newSpawner->spawn(spawnOptions));
+		} catch (const boost::thread_interrupted &) {
+			return;
+		} catch (SpawningKit::SpawnException &e) {
+			processAndLogNewSpawnException(e, spawnOptions, pool->getContext());
+			ScopedLock l(pool->syncher);
+			if (isAlive() && restartsInitiated == this->restartsInitiated) {
+				m_rollingRestarting = false;
+				if (replaced == 0) {
+					resetOptions(oldOptions);
+					spawner = oldSpawner;
+				}
+			}
+			P_WARN("Rolling restart of group " << getName() << " aborted: a replacement "
+				"process failed to spawn. " << (toReplace.size() - replaced)
+				<< " process(es) remain on the previous version");
+			return;
+		}
+
+		UPDATE_TRACE_POINT();
+		ScopeGuard guard(boost::bind(Process::forceTriggerShutdownAndCleanup, fresh));
+		Pool::DebugSupportPtr debug = pool->debugSupport;
+		if (debug != NULL && debug->restarting) {
+			boost::this_thread::restore_interruption ri(di);
+			boost::this_thread::restore_syscall_interruption rsi(dsi);
+			boost::this_thread::interruption_point();
+			debug->debugger->send("About to replace process " + toString(replaced + 1));
+			debug->messages->recv("Replace process " + toString(replaced + 1));
+		}
+		boost::container::vector<Callback> actions;
+		ScopedLock l(pool->syncher);
+		if (!isAlive() || restartsInitiated != this->restartsInitiated) {
+			P_DEBUG("Rolling restart of group " << getName() << " aborted: group is shutting "
+				"down or a newer restart was initiated. Dropping " << fresh->inspect());
+			return;
+		}
+
+		if (old->enabled != Process::ENABLED || old->getGroup() != this) {
+			// Something else (e.g. a crash) already removed this process; the
+			// regular spawn logic restores the process count.
+			P_DEBUG("Skipping replacement of " << old->inspect() << ": no longer enabled");
+			continue;
+		}
+
+		// Both steps happen under one lock hold, so requests never observe the gap.
+		// Attach first; if the group or pool is at its process limit, detaching the
+		// old process frees the slot (detached processes don't count towards capacity).
+		AttachResult result = attach(fresh, actions);
+		if (result == AR_GROUP_UPPER_LIMITS_REACHED || result == AR_POOL_AT_FULL_CAPACITY) {
+			detach(old, actions);
+			result = attach(fresh, actions);
+		} else if (result == AR_OK) {
+			detach(old, actions);
+		}
+		if (result != AR_OK) {
+			P_WARN("Rolling restart of group " << getName() << " aborted: unable to attach "
+				"replacement process (attach result " << (int) result << ")");
+			m_rollingRestarting = false;
+			if (old->enabled == Process::DETACHED && shouldSpawn()) {
+				spawn();
+			}
+			return;
+		}
+		guard.clear();
+		replaced++;
+		rollingRestartReplaced = replaced;
+		if (getWaitlist.empty()) {
+			pool->assignSessionsToGetWaiters(actions);
+		} else {
+			assignSessionsToGetWaiters(actions);
+		}
+		P_INFO("Rolling restart of group " << getName() << ": replaced " << replaced
+			<< " of " << toReplace.size() << " process(es)");
+		l.unlock();
+		Pool::runAllActions(actions);
+	}
+
+	ScopedLock l(pool->syncher);
+	if (isAlive() && restartsInitiated == this->restartsInitiated) {
+		m_rollingRestarting = false;
+		verifyInvariants();
+		P_INFO("Rolling restart of group " << getName() << " done");
+		Pool::DebugSupportPtr debug = pool->debugSupport;
+		if (debug != NULL && debug->restarting) {
+			debug->debugger->send("Rolling restart done");
+		}
+	}
+	l.unlock();
+	oldSpawner.reset();
+}
+
 
 /****************************
  *
@@ -321,9 +481,37 @@ Group::restart(const Options &options, RestartMethod method) {
 
 	processesBeingSpawned = 0;
 	m_spawning   = false;
-	m_restarting = true;
+	// A rolling restart needs at least one process to keep serving while the others are
+	// replaced; with none, a blocking restart is all we can do.
+	m_rollingRestarting = (method == RM_ROLLING
+		|| (method == RM_DEFAULT && this->options.rollingRestart))
+		&& !enabledProcesses.empty();
+	m_restarting = !m_rollingRestarting;
+	if (m_rollingRestarting) {
+		rollingRestartTotal = enabledProcesses.size();
+		rollingRestartReplaced = 0;
+		rollingRestartStartTime = SystemTime::getUsec();
+	}
 	uuid         = generateUuid(pool);
 	this->options.groupUuid = uuid;
+	if (m_rollingRestarting) {
+		// Switch to the new spawner and options right now, while we hold the pool lock.
+		Options oldOptions = this->options.copyAndPersist().clearPerRequestFields();
+		SpawningKit::SpawnerPtr oldSpawner = spawner;
+		// `options` may alias this->options (e.g. when called from the API), so copy it first.
+		Options newOptions = options.copyAndPersist().clearPerRequestFields();
+		resetOptions(newOptions);
+		spawner = getContext()->spawningKitFactory->create(this->options);
+		getPool()->interruptableThreads.create_thread(
+			boost::bind(&Group::finalizeRollingRestart, this, shared_from_this(),
+				oldOptions, oldSpawner,
+				this->options.copyAndPersist().clearPerRequestFields(), spawner,
+				restartsInitiated),
+			"Group rolling restarter: " + getName(),
+			POOL_HELPER_THREAD_STACK_SIZE
+		);
+		return;
+	}
 	detachAll(actions);
 	getPool()->interruptableThreads.create_thread(
 		boost::bind(&Group::finalizeRestart, this, shared_from_this(),

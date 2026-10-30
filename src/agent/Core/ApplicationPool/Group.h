@@ -182,7 +182,21 @@ public:
 	 *    if m_restarting: processesBeingSpawned == 0
 	 */
 	bool m_restarting: 1;
+	/** Whether the restart in progress was requested as a rolling restart. Separate from
+	 * m_restarting so that we don't disturb the invariants that attach() and spawn() check
+	 * against m_restarting: while a rolling restart is in progress, m_restarting is false.
+	 * Cleared by finalizeRollingRestart() when it finishes or aborts.
+	 */
+	bool m_rollingRestarting: 1;
 	bool alwaysRestartFileExists: 1;
+	/** Progress of the rolling restart in progress, for passenger-status. Only meaningful
+	 * while m_rollingRestarting is true. A process is "pending replacement" if it was
+	 * spawned before rollingRestartStartTime (microseconds since epoch), otherwise it is
+	 * a replacement.
+	 */
+	unsigned int rollingRestartTotal;
+	unsigned int rollingRestartReplaced;
+	unsigned long long rollingRestartStartTime;
 
 	/** Contains the spawn loop thread and the restarter thread. */
 	dynamic_thread_group interruptableThreads;
@@ -225,6 +239,8 @@ public:
 	void finalizeRestart(GroupPtr self, Options oldOptions, Options newOptions,
 		RestartMethod method, SpawningKit::FactoryPtr spawningKitFactory,
 		unsigned int restartsInitiated, boost::container::vector<Callback> postLockActions);
+	void finalizeRollingRestart(GroupPtr self, Options oldOptions, SpawningKit::SpawnerPtr oldSpawner,
+		Options newOptions, SpawningKit::SpawnerPtr newSpawner, unsigned int restartsInitiated);
 
 	/****** Process list management ******/
 
