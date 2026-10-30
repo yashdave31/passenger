@@ -890,6 +890,104 @@ namespace tut {
 	}
 
 
+	/*********** Test rolling restarts ***********/
+
+	TEST_METHOD(22) {
+		set_test_name("Rolling restart replaces processes one at a time without ever leaving the group empty");
+		initPoolDebugging();
+		debug->spawning = false;
+		ensureMinProcesses(3);
+		GroupPtr group = pool->getGroup("stub/rack");
+
+		set<pid_t> oldPids;
+		{
+			LockGuard l(pool->syncher);
+			vector<ProcessPtr> processes = pool->getProcesses(false);
+			for (unsigned int i = 0; i < processes.size(); i++) {
+				oldPids.insert(processes[i]->getPid());
+			}
+		}
+
+		Pool::RestartOptions restartOptions = Pool::RestartOptions::makeAuthorized();
+		restartOptions.method = RM_ROLLING;
+		ensure(pool->restartGroupByName("stub/rack", restartOptions));
+
+		// Step through the roll. Each time a replacement is ready, all old processes
+		// must still be enabled and serving.
+		for (unsigned int i = 1; i <= 3; i++) {
+			debug->debugger->recv("About to replace process " + toString(i));
+			{
+				LockGuard l(pool->syncher);
+				ensure_equals("(enabled count before replacing)",
+					group->enabledCount, 3);
+				ensure("(rolling flag set)", group->m_rollingRestarting);
+				ensure("(not blocking-restarting)", !group->restarting());
+			}
+			debug->messages->send("Replace process " + toString(i));
+		}
+		debug->debugger->recv("Rolling restart done");
+
+		LockGuard l(pool->syncher);
+		ensure_equals(group->enabledCount, 3);
+		ensure(!group->m_rollingRestarting);
+		for (ProcessList::const_iterator it = group->enabledProcesses.begin();
+			it != group->enabledProcesses.end(); it++)
+		{
+			ensure("(all processes replaced)", oldPids.find((*it)->getPid()) == oldPids.end());
+		}
+	}
+
+	TEST_METHOD(23) {
+		set_test_name("A newer restart supersedes a rolling restart in progress");
+		initPoolDebugging();
+		debug->spawning = false;
+		ensureMinProcesses(2);
+		GroupPtr group = pool->getGroup("stub/rack");
+
+		Pool::RestartOptions restartOptions = Pool::RestartOptions::makeAuthorized();
+		restartOptions.method = RM_ROLLING;
+		ensure(pool->restartGroupByName("stub/rack", restartOptions));
+		debug->debugger->recv("About to replace process 1");
+		ensure(pool->restartGroupByName("stub/rack", restartOptions));
+		debug->debugger->recv("About to replace process 1");
+
+		// Release both rolls. The first notices it was superseded and drops its
+		// replacement; the second carries on.
+		debug->messages->send("Replace process 1");
+		debug->messages->send("Replace process 1");
+		debug->debugger->recv("About to replace process 2");
+		debug->messages->send("Replace process 2");
+		debug->debugger->recv("Rolling restart done");
+
+		LockGuard l(pool->syncher);
+		ensure_equals(group->enabledCount, 2);
+		ensure(!group->m_rollingRestarting);
+	}
+
+	TEST_METHOD(24) {
+		set_test_name("Many consecutive rolling restarts keep the pool consistent");
+		initPoolDebugging();
+		debug->spawning = false;
+		debug->restarting = false;
+		ensureMinProcesses(3);
+		GroupPtr group = pool->getGroup("stub/rack");
+
+		Pool::RestartOptions restartOptions = Pool::RestartOptions::makeAuthorized();
+		restartOptions.method = RM_ROLLING;
+		for (unsigned int i = 0; i < 20; i++) {
+			ensure(pool->restartGroupByName("stub/rack", restartOptions));
+			EVENTUALLY(10,
+				LockGuard l(pool->syncher);
+				result = !group->m_rollingRestarting && group->enabledCount == 3;
+			);
+			LockGuard l(pool->syncher);
+			pool->fullVerifyInvariants();
+		}
+		EVENTUALLY(10,
+			result = pool->getProcessCount() == 3;
+		);
+	}
+
 	/*********** Test asyncGet() behavior on multiple Groups ***********/
 
 	TEST_METHOD(30) {

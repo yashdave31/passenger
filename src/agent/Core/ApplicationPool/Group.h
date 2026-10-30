@@ -188,6 +188,7 @@ public:
 	 * Cleared by finalizeRollingRestart() when it finishes or aborts.
 	 */
 	bool m_rollingRestarting: 1;
+	bool alwaysRestartFileExists: 1;
 	/** Progress of the rolling restart in progress, for passenger-status. Only meaningful
 	 * while m_rollingRestarting is true. A process is "pending replacement" if it was
 	 * spawned before rollingRestartStartTime (microseconds since epoch), otherwise it is
@@ -196,7 +197,6 @@ public:
 	unsigned int rollingRestartTotal;
 	unsigned int rollingRestartReplaced;
 	unsigned long long rollingRestartStartTime;
-	bool alwaysRestartFileExists: 1;
 
 	/** Contains the spawn loop thread and the restarter thread. */
 	dynamic_thread_group interruptableThreads;

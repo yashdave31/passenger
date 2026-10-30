@@ -1,6 +1,6 @@
 Release 6.2.2 (Not yet released)
 -------------
- * 
+ * [Nginx] Add the `passenger_rolling_restarts` option. With it on, a restart replaces application processes one at a time, so the application keeps serving requests instead of stalling while it boots.
 
 
 Release 6.2.1

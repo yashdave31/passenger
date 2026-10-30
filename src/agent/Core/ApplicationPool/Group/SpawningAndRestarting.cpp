@@ -390,6 +390,14 @@ Group::finalizeRollingRestart(GroupPtr self, Options oldOptions, SpawningKit::Sp
 
 		UPDATE_TRACE_POINT();
 		ScopeGuard guard(boost::bind(Process::forceTriggerShutdownAndCleanup, fresh));
+		Pool::DebugSupportPtr debug = pool->debugSupport;
+		if (debug != NULL && debug->restarting) {
+			boost::this_thread::restore_interruption ri(di);
+			boost::this_thread::restore_syscall_interruption rsi(dsi);
+			boost::this_thread::interruption_point();
+			debug->debugger->send("About to replace process " + toString(replaced + 1));
+			debug->messages->recv("Replace process " + toString(replaced + 1));
+		}
 		boost::container::vector<Callback> actions;
 		ScopedLock l(pool->syncher);
 		if (!isAlive() || restartsInitiated != this->restartsInitiated) {
@@ -443,6 +451,10 @@ Group::finalizeRollingRestart(GroupPtr self, Options oldOptions, SpawningKit::Sp
 		m_rollingRestarting = false;
 		verifyInvariants();
 		P_INFO("Rolling restart of group " << getName() << " done");
+		Pool::DebugSupportPtr debug = pool->debugSupport;
+		if (debug != NULL && debug->restarting) {
+			debug->debugger->send("Rolling restart done");
+		}
 	}
 	l.unlock();
 	oldSpawner.reset();
