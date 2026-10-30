@@ -149,6 +149,11 @@ Group::inspectXml(std::ostream &stream, bool includeSecrets) const {
 	if (restarting()) {
 		stream << "<restarting/>";
 	}
+	if (m_rollingRestarting) {
+		stream << "<rolling_restarting/>";
+		stream << "<rolling_restart_total>" << rollingRestartTotal << "</rolling_restart_total>";
+		stream << "<rolling_restart_replaced>" << rollingRestartReplaced << "</rolling_restart_replaced>";
+	}
 	if (includeSecrets) {
 		stream << "<secret>" << escapeForXml(getApiKey().toStaticString()) << "</secret>";
 		stream << "<api_key>" << escapeForXml(getApiKey().toStaticString()) << "</api_key>";

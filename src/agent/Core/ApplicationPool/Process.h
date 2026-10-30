@@ -689,6 +689,10 @@ public:
 		return spawnerCreationTime;
 	}
 
+	unsigned long long getSpawnEndTime() const {
+		return spawnEndTime;
+	}
+
 	bool isDummy() const {
 		return type == SpawningKit::Result::DUMMY;
 	}

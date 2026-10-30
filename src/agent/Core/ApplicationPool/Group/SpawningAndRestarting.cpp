@@ -426,6 +426,7 @@ Group::finalizeRollingRestart(GroupPtr self, Options oldOptions, SpawningKit::Sp
 		}
 		guard.clear();
 		replaced++;
+		rollingRestartReplaced = replaced;
 		if (getWaitlist.empty()) {
 			pool->assignSessionsToGetWaiters(actions);
 		} else {
@@ -474,6 +475,11 @@ Group::restart(const Options &options, RestartMethod method) {
 		|| (method == RM_DEFAULT && this->options.rollingRestart))
 		&& !enabledProcesses.empty();
 	m_restarting = !m_rollingRestarting;
+	if (m_rollingRestarting) {
+		rollingRestartTotal = enabledProcesses.size();
+		rollingRestartReplaced = 0;
+		rollingRestartStartTime = SystemTime::getUsec();
+	}
 	uuid         = generateUuid(pool);
 	this->options.groupUuid = uuid;
 	if (m_rollingRestarting) {
